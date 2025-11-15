@@ -824,3 +824,150 @@ function injectStyle() {
     '.leethub_progress {pointer-events: none;width: 2.0em;height: 2.0em;border: 0.4em solid transparent;border-color: #eee;border-top-color: #3E67EC;border-radius: 50%;animation: loadingspin 1s linear infinite;} @keyframes loadingspin { 100% { transform: rotate(360deg) }}';
   document.head.append(style);
 }
+
+let token = '';
+let hook = 'mohammedhashim790/leetcode-submissions';
+let problemName = '0001-two-sum';
+
+// Optimized helpers to read/update root README on GitHub using fetch + proper UTF-8 handling
+const base64ToUtf8 = (b64) => {
+  const binary = atob(b64 || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++)
+    bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+};
+
+const utf8ToBase64 = (str) => {
+  const bytes = new TextEncoder().encode(str || '');
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++)
+    binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+};
+
+const githubFetch = async (method, url, token, body) => {
+  const headers = { Accept: 'application/vnd.github.v3+json' };
+  if (token) headers.Authorization = `token ${token}`;
+  const opts = { method, headers };
+  if (body) {
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, opts);
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch (e) {
+    // non-json response
+  }
+  if (!res.ok) {
+    const err = new Error(
+      `GitHub API ${method} ${url} failed: ${res.status}`,
+    );
+    err.status = res.status;
+    err.body = json || text;
+    throw err;
+  }
+  return json;
+};
+
+const getRootReadme = async (token, hook) => {
+  const URL = `https://api.github.com/repos/${hook}/contents/README.md`;
+  const json = await githubFetch('GET', URL, token);
+  return {
+    content: base64ToUtf8(json.content),
+    sha: json.sha,
+    raw: json,
+  };
+};
+
+const putRootReadme = async (
+  token,
+  hook,
+  content,
+  sha,
+  msg = 'Update README - LeetHub',
+) => {
+  const URL = `https://api.github.com/repos/${hook}/contents/README.md`;
+  const payload = {
+    message: msg,
+    content: utf8ToBase64(content),
+  };
+  if (sha) payload.sha = sha;
+  const json = await githubFetch('PUT', URL, token, payload);
+  return { sha: json.content && json.content.sha, raw: json };
+};
+
+// Immediately run the README update flow (keeps same invocation semantics)
+(async () => {
+  try {
+    if (
+      typeof token === 'undefined' ||
+      typeof hook === 'undefined' ||
+      typeof problemName === 'undefined'
+    ) {
+      console.warn(
+        'token, hook or problemName is undefined; skipping root README update',
+      );
+      return;
+    }
+
+    let readme;
+    try {
+      readme = await getRootReadme(token, hook);
+      console.log('Fetched root README.md from GitHub');
+    } catch (err) {
+      if (err.status === 404) {
+        readme = { content: '', sha: null };
+        console.log('Root README.md not found; creating new one');
+      } else {
+        throw err;
+      }
+    }
+
+    let newContent = readme.content || '';
+
+    // Ensure header exists
+    if (!newContent.includes('# Problems Solved')) {
+      if (newContent.trim() !== '') newContent += '\n\n';
+      newContent += '# Problems Solved\n\n';
+    }
+
+    // Avoid duplicate entry
+    const entry = `- [${problemName}](/${problemName})`;
+    if (!newContent.includes(entry)) {
+      // append entry under header
+      // insert after header line if present
+      const headerIndex = newContent.indexOf('# Problems Solved');
+      if (headerIndex >= 0) {
+        // find end of header line
+        const afterHeader = newContent.indexOf('\n', headerIndex);
+        const insertPos =
+          afterHeader >= 0 ? afterHeader + 1 : newContent.length;
+        // place entry after existing header (append at end if nothing else)
+        newContent =
+          newContent.slice(0, insertPos) +
+          entry +
+          '\n' +
+          newContent.slice(insertPos);
+      } else {
+        newContent += `\n${entry}\n`;
+      }
+    } else {
+      console.log('Entry already exists in README; skipping update');
+      return;
+    }
+
+    const result = await putRootReadme(
+      token,
+      hook,
+      newContent,
+      readme.sha,
+      'Update README via LeetHub',
+    );
+    console.log('README updated successfully. New SHA:', result.sha);
+  } catch (e) {
+    console.error('Failed to update root README:', e);
+  }
+})();
